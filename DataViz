@@ -1,0 +1,81 @@
+library(ggplot2)
+library(Matrix)
+
+ccgtable <- test_data_ccgapp %>%
+  select(passer_player_name, Year) %>%
+  mutate(rank = row_number(),
+         c_apps = test_data_ccgapp$First3CCGAppearances)%>%
+  select(rank, passer_player_name, Year, c_apps) %>%
+ccgtable[["_data"]][["Predictions"]] <- c(3, 1, 48, 15, 13, 12, 21)
+ccgtable[["_data"]][["headshotURL"]]<- c("https://static.www.nfl.com/image/private/t_player_profile_landscape_2x/f_auto/league/pbl27kxsr5ulgxmvtvfn",                                          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTOCsYctilYIDMI3UEgAsUzgtAxu0rbNVA2SA&usqp=CAU",
+                                          "https://static.www.nfl.com/image/private/t_player_profile_landscape_2x/f_auto/league/qknkhe4w6liovjubzmnh",                                          "https://static.www.nfl.com/image/private/t_player_profile_landscape_2x/f_auto/league/iv04omcunr78zezpnf8t",                                           "https://static.www.nfl.com/image/private/t_player_profile_landscape_2x/f_auto/league/nkb9x92lbea6ayknzoba",                                          "https://static.www.nfl.com/image/private/t_player_profile_landscape_2x/f_auto/league/af6nbjqa6qubnu8oi4ms",                                          "https://static.www.nfl.com/image/private/t_player_profile_landscape_2x/t_lazy/f_auto/league/nkqhnr3mexaycazc3pin"
+)
+
+ccgtable[["_data"]] <- ccgtable[["_data"]] %>%
+  select(1,2,5,6,3,4)%>%
+arrange(desc(Predictions))
+
+  rookieccg <- data.frame(
+    rank = "",
+    headshotURL = "",
+    passer_player_name = "1st Round QB Avg ",
+    Year = "",
+    c_apps = "",
+    Predictions = 17.5
+    
+  )
+  
+
+  ccgtable[["_data"]] <- rbind(ccgtable[["_data"]], rookieccg)
+
+  ccgtable[["_data"]]$Predictions <- c(48.7, 21.2,17.5, 15.6,13.1, 12.1, 2.97, 1.45)
+  
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "J.Hurts"] <- 4
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "J.Herbert"] <- 3
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "J.Burrow"] <- 1
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "K.Murray"] <- 5
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "T.Tagovailoa"] <- 2
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "D.Jones"] <- 6
+ccgtable[["_data"]]$rank[ccgtable[["_data"]]$passer_player_name == "D.Lock"] <- 7
+
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "J.Hurts"] <- 13
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "J.Herbert"] <- 15
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "J.Burrow"] <- 48
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "K.Murray"] <- 12
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "T.Tagovailoa"] <- 21
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "D.Jones"] <- 3
+ccgtable[["_data"]]$Predictions[ccgtable[["_data"]]$passer_player_name == "D.Lock"] <- 1
+
+gt_table <- gt(ccgtable[["_data"]]) %>%
+  gtExtras::gt_theme_538() %>%
+    cols_align(align = "center") %>%
+    cols_label(rank = "Rank",
+               passer_player_name = "Name",
+               headshotURL = "",
+               Year = "Year",
+               c_apps = "CCG Appearances",
+               Predictions = "Predictions(%)") %>%
+    tab_header(title = "% chance of making CCG in Years 5-8",
+               subtitle = "Playing under the predicted 2nd contract")
+  gt_table <- gt_hulk_col_numeric(gt_table, column = "Predictions")
+  gt_table_with_images3 <- gt_img_rows(gt_table, column = "headshotURL")
+  gt_table_with_images3
+  
+
+
+importance_matrix <- as.matrix(importance_sbwins)
+importance_df <- as.data.frame(importance_matrix)
+colnames(importance_df)[1] <- "Feature"
+importance_df$Importance <- importance_df$Feature
+importance_df$Importance <- as.numeric(importance_df$Importance)
+importance_df <- importance_df[order(importance_df$Importance, decreasing = TRUE), ]
+importance_df <- importance_df[-1, ]
+
+importance_df$Feature <- as.character(importance_df$Feature)
+importance_df$Importance <- as.numeric(importance_df$Importance)
+ggplot(importance_df, aes(x = Feature, y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue3") +
+  xlab("Feature") +
+  ylab("Importance") +
+  ggtitle("Feature Importance for Winning SB") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
