@@ -1,0 +1,257 @@
+library(tidyverse)
+library(dplyr)
+library(nflfastR)
+
+stats <- load_pbp(c(2006:2022))
+
+stats <- stats %>% select(passer_player_name, passer, posteam, season, season_type, pass_attempt, passing_yards, pass_touchdown,
+                          interception, rushing_yards, air_epa, epa, air_wpa, yards_gained, cpoe, rush_touchdown,
+                          complete_pass, rusher_player_name, game_id, week, game_seconds_remaining, result) %>% 
+  filter(season_type == "REG")
+
+
+qb1 <- stats %>% unique() %>%
+  group_by(passer_player_name, season, game_id) %>%
+  summarize(passes = n()) 
+qb1 <- qb1 %>%
+  group_by(passer_player_name, season) %>% summarize(tot_games_played = n())
+
+qbpassing <- stats %>% group_by(season, passer_player_name, posteam) %>% 
+  summarize(epa_play = mean(epa, na.rm = TRUE),
+            avg_wpa = mean(air_wpa, na.rm = TRUE),
+            tot_completions = sum(complete_pass, na.rm = TRUE),
+            tot_attempts = sum(pass_attempt, na.rm = TRUE),
+            tot_passing_yards = sum(passing_yards, na.rm = TRUE),
+            tot_passing_tds = sum(pass_touchdown, na.rm = TRUE),
+            tot_ints = sum(interception, na.rm = TRUE),
+            avg_cpoe = mean(cpoe, na.rm = TRUE)) %>% 
+  filter(tot_attempts >= 100)
+
+qbpassing <- inner_join(qb1, qbpassing, by = c("passer_player_name", "season"))
+
+qbpassing <- qbpassing %>%
+  mutate(completionspg = tot_completions/tot_games_played,
+         attemptspg = tot_attempts/tot_games_played,
+         passingyardspg = tot_passing_yards/tot_games_played,
+         passingtdspg = tot_passing_tds/tot_games_played,
+         intspg = tot_ints/tot_games_played)
+
+qbpassing <- qbpassing %>% 
+  group_by(season) %>%
+  mutate(passingyardspg_rank = order(order(passingyardspg, season, decreasing=TRUE)),
+         cpoe_rank = order(order(avg_cpoe, season, decreasing=TRUE)),
+         avg_wpa_rank = order(order(avg_wpa, season, decreasing=TRUE)),
+         epa_rank = order(order(epa_play, season, decreasing=TRUE)),
+         passingtdspg_rank = order(order(passingtdspg, season, decreasing=TRUE)),
+         completion_percentage = completionspg/attemptspg,
+         comp_percentage_rank = order(order(completion_percentage, season, decreasing=TRUE))) 
+
+
+
+qbrushing <- stats %>%
+  mutate(passer_player_name = rusher_player_name) %>%
+  group_by(season, passer_player_name, posteam) %>% 
+  summarize(tot_rushing_yards = sum(rushing_yards, na.rm = TRUE),
+            tot_rushing_tds = sum(rush_touchdown, na.rm = TRUE))
+
+qbrushing <- inner_join(qbrushing, qbpassing, by = c("passer_player_name", "season", "posteam")) %>%
+  select(passer_player_name, season, tot_rushing_yards,
+         tot_rushing_tds, tot_games_played, posteam)
+
+qbrushing <-  qbrushing %>%
+  mutate(rushingyardspg = tot_rushing_yards/tot_games_played,
+         rushingtdspg = tot_rushing_tds/tot_games_played)
+
+qbstats <- merge(qbrushing, qbpassing)
+
+qbstats <- qbstats %>% 
+  mutate(yardspg = rushingyardspg + passingyardspg,
+         tdspg = rushingtdspg + passingtdspg)
+qbstats <- qbstats %>% group_by(season) %>%
+  mutate(yardspg_rank = order(order(yardspg, season, decreasing=TRUE)),
+         tdspg_rank = order(order(tdspg, season, decreasing=TRUE)),
+         rushingyardspg_rank = order(order(rushingyardspg, season, decreasing=TRUE)),
+         rushingtdspg_rank = order(order(rushingtdspg, season, decreasing=TRUE)))
+
+qbstats <- qbstats %>%
+  select(passer_player_name, season, posteam, tot_games_played,
+         passingyardspg_rank, passingtdspg_rank, cpoe_rank,
+         avg_wpa_rank, epa_rank, comp_percentage_rank, 
+         rushingyardspg_rank, rushingtdspg_rank, tdspg_rank, yardspg_rank)
+draft_year <- read.csv("qbmodel1.csv")
+
+qbstats<- merge(qbstats, draft_year[, c("passer_player_name", "Year")], 
+                by.x = "passer_player_name", by.y = "passer_player_name", na.rm = TRUE)
+
+qbstats <- qbstats %>% mutate(YearSinceRookie = season - Year + 1) %>%
+  filter(YearSinceRookie <= 4) 
+
+qbstats <- qbstats %>%
+  group_by(passer_player_name) %>%
+  filter(n() >= 3) %>%
+  ungroup()
+
+qbstats <- qbstats %>%
+  filter(!(row_number() %in% c(42, 44)))
+
+
+morestats <- read.csv("QBModelStats.csv")
+
+qbstats <- merge(qbstats, morestats, by.x = c("passer_player_name", "season"), by.y = c("Name", "Year"))
+
+
+
+TotQBStats <- qbstats %>%
+  mutate(tot_games_played1 = ifelse(YearSinceRookie == 1, tot_games_played, NA),
+         tot_games_played2 = ifelse(YearSinceRookie == 2, tot_games_played, NA),
+         tot_games_played3 = ifelse(YearSinceRookie == 3, tot_games_played, NA),
+         tot_games_played4 = ifelse(YearSinceRookie == 4, tot_games_played, NA),
+         passingyardspg_rank1 = ifelse(YearSinceRookie == 1, passingyardspg_rank, NA),
+         passingyardspg_rank2 = ifelse(YearSinceRookie == 2, passingyardspg_rank, NA),
+         passingyardspg_rank3 = ifelse(YearSinceRookie == 3, passingyardspg_rank, NA),
+         passingyardspg_rank4 = ifelse(YearSinceRookie == 4, passingyardspg_rank, NA),
+         passingtdspg_rank1 = ifelse(YearSinceRookie == 1, passingtdspg_rank, NA),
+         passingtdspg_rank2 = ifelse(YearSinceRookie == 2, passingtdspg_rank, NA),
+         passingtdspg_rank3 = ifelse(YearSinceRookie == 3, passingtdspg_rank, NA),
+         passingtdspg_rank4 = ifelse(YearSinceRookie == 4, passingtdspg_rank, NA),
+         cpoe_rank1 = ifelse(YearSinceRookie == 1, cpoe_rank, NA),
+         cpoe_rank2 = ifelse(YearSinceRookie == 2, cpoe_rank, NA),
+         cpoe_rank3 = ifelse(YearSinceRookie == 3, cpoe_rank, NA),
+         cpoe_rank4 = ifelse(YearSinceRookie == 4, cpoe_rank, NA),
+         avg_wpa_rank1 = ifelse(YearSinceRookie == 1, avg_wpa_rank, NA),
+         avg_wpa_rank2 = ifelse(YearSinceRookie == 2, avg_wpa_rank, NA),
+         avg_wpa_rank3 = ifelse(YearSinceRookie == 3, avg_wpa_rank, NA),
+         avg_wpa_rank4 = ifelse(YearSinceRookie == 4, avg_wpa_rank, NA),
+         epa_rank1 = ifelse(YearSinceRookie == 1, epa_rank, NA),
+         epa_rank2 = ifelse(YearSinceRookie == 2, epa_rank, NA),
+         epa_rank3 = ifelse(YearSinceRookie == 3, epa_rank, NA),
+         epa_rank4 = ifelse(YearSinceRookie == 4, epa_rank, NA),
+         comp_percentage_rank1 = ifelse(YearSinceRookie == 1, comp_percentage_rank, NA),
+         comp_percentage_rank2 = ifelse(YearSinceRookie == 2, comp_percentage_rank, NA),
+         comp_percentage_rank3 = ifelse(YearSinceRookie == 3, comp_percentage_rank, NA),
+         comp_percentage_rank4 = ifelse(YearSinceRookie == 4, comp_percentage_rank, NA),
+         rushingyardspg_rank1 = ifelse(YearSinceRookie == 1, rushingyardspg_rank, NA),
+         rushingyardspg_rank2 = ifelse(YearSinceRookie == 2, rushingyardspg_rank, NA),
+         rushingyardspg_rank3 = ifelse(YearSinceRookie == 3, rushingyardspg_rank, NA),
+         rushingyardspg_rank4 = ifelse(YearSinceRookie == 4, rushingyardspg_rank, NA),
+         rushingtdspg_rank1 = ifelse(YearSinceRookie == 1, rushingtdspg_rank, NA),
+         rushingtdspg_rank2 = ifelse(YearSinceRookie == 2, rushingtdspg_rank, NA),
+         rushingtdspg_rank3 = ifelse(YearSinceRookie == 3, rushingtdspg_rank, NA),
+         rushingtdspg_rank4 = ifelse(YearSinceRookie == 4, rushingtdspg_rank, NA),
+         tdspg_rank1 = ifelse(YearSinceRookie == 1, tdspg_rank, NA),
+         tdspg_rank2 = ifelse(YearSinceRookie == 2, tdspg_rank, NA),
+         tdspg_rank3 = ifelse(YearSinceRookie == 3, tdspg_rank, NA),
+         tdspg_rank4 = ifelse(YearSinceRookie == 4, tdspg_rank, NA),
+         yardspg_rank1 = ifelse(YearSinceRookie == 1, yardspg_rank, NA),
+         yardspg_rank2 = ifelse(YearSinceRookie == 2, yardspg_rank, NA),
+         yardspg_rank3 = ifelse(YearSinceRookie == 3, yardspg_rank, NA),
+         yardspg_rank4 = ifelse(YearSinceRookie == 4, yardspg_rank, NA),
+         PassGrade1 = ifelse(YearSinceRookie == 1, PassGrade, NA),
+         PassGrade2 = ifelse(YearSinceRookie == 2, PassGrade, NA),
+         PassGrade3 = ifelse(YearSinceRookie == 3, PassGrade, NA),
+         PassGrade4 = ifelse(YearSinceRookie == 4, PassGrade, NA),
+         BTTPercentage1 = ifelse(YearSinceRookie == 1, BTTPercentage, NA),
+         BTTPercentage2 = ifelse(YearSinceRookie == 2, BTTPercentage, NA),
+         BTTPercentage3 = ifelse(YearSinceRookie == 3, BTTPercentage, NA),
+         BTTPercentage4 = ifelse(YearSinceRookie == 4, BTTPercentage, NA),
+         TWPPercentage1 = ifelse(YearSinceRookie == 1, TWPPercentage, NA),
+         TWPPercentage2 = ifelse(YearSinceRookie == 2, TWPPercentage, NA),
+         TWPPercentage3 = ifelse(YearSinceRookie == 3, TWPPercentage, NA),
+         TWPPercentage4 = ifelse(YearSinceRookie == 4, TWPPercentage, NA),
+         SkPercentage1 = ifelse(YearSinceRookie == 1, SkPercentage, NA),
+         SkPercentage2 = ifelse(YearSinceRookie == 2, SkPercentage, NA),
+         SkPercentage3 = ifelse(YearSinceRookie == 3, SkPercentage, NA),
+         SkPercentage4 = ifelse(YearSinceRookie == 4, SkPercentage, NA),
+         ScrPercentage1 = ifelse(YearSinceRookie == 1, ScrPercentage, NA),
+         ScrPercentage2 = ifelse(YearSinceRookie == 2, ScrPercentage, NA),
+         ScrPercentage3 = ifelse(YearSinceRookie == 3, ScrPercentage, NA),
+         ScrPercentage4 = ifelse(YearSinceRookie == 4, ScrPercentage, NA),
+         ADOT1 = ifelse(YearSinceRookie == 1, ADOT, NA),
+         ADOT2 = ifelse(YearSinceRookie == 2, ADOT, NA),
+         ADOT3 = ifelse(YearSinceRookie == 3, ADOT, NA),
+         ADOT4 = ifelse(YearSinceRookie == 4, ADOT, NA)
+  )
+
+
+
+
+TotQBStats <- TotQBStats %>%
+  select(-season, -posteam, -tot_games_played, -passingyardspg_rank, -passingtdspg_rank,
+         -cpoe_rank, -avg_wpa_rank, -epa_rank, -comp_percentage_rank, -tdspg_rank,
+         -rushingyardspg_rank, -rushingtdspg_rank, -yardspg_rank, -YearSinceRookie,
+         -PassGrade, -BTTPercentage, -TWPPercentage, -SkPercentage, -ScrPercentage, -ADOT)
+
+compress_rows <- function(df) {
+  df <- df %>%
+    group_by(passer_player_name, Year) %>%
+    summarize(
+      tot_games_played1 = first(tot_games_played1[!is.na(tot_games_played1)]),
+      tot_games_played2 = first(tot_games_played2[!is.na(tot_games_played2)]),
+      tot_games_played3 = first(tot_games_played3[!is.na(tot_games_played3)]),
+      tot_games_played4 = first(tot_games_played4[!is.na(tot_games_played4)]),
+      passingyardspg_rank1 = first(passingyardspg_rank1[!is.na(passingyardspg_rank1)]),
+      passingyardspg_rank2 = first(passingyardspg_rank2[!is.na(passingyardspg_rank2)]),
+      passingyardspg_rank3 = first(passingyardspg_rank3[!is.na(passingyardspg_rank3)]),
+      passingyardspg_rank4 = first(passingyardspg_rank4[!is.na(passingyardspg_rank4)]),
+      passingtdspg_rank1 = first(passingtdspg_rank1[!is.na(passingtdspg_rank1)]),
+      passingtdspg_rank2 = first(passingtdspg_rank2[!is.na(passingtdspg_rank2)]),
+      passingtdspg_rank3 = first(passingtdspg_rank3[!is.na(passingtdspg_rank3)]),
+      passingtdspg_rank4 = first(passingtdspg_rank4[!is.na(passingtdspg_rank4)]),
+      cpoe_rank1 = first(cpoe_rank1[!is.na(cpoe_rank1)]),
+      cpoe_rank2 = first(cpoe_rank2[!is.na(cpoe_rank2)]),
+      cpoe_rank3 = first(cpoe_rank3[!is.na(cpoe_rank3)]),
+      cpoe_rank4 = first(cpoe_rank4[!is.na(cpoe_rank4)]),
+      avg_wpa_rank1 = first(avg_wpa_rank1[!is.na(avg_wpa_rank1)]),
+      avg_wpa_rank2 = first(avg_wpa_rank2[!is.na(avg_wpa_rank2)]),
+      avg_wpa_rank3 = first(avg_wpa_rank3[!is.na(avg_wpa_rank3)]),
+      avg_wpa_rank4 = first(avg_wpa_rank4[!is.na(avg_wpa_rank4)]),
+      epa_rank1 = first(epa_rank1[!is.na(epa_rank1)]),
+      epa_rank2 = first(epa_rank2[!is.na(epa_rank2)]),
+      epa_rank3 = first(epa_rank3[!is.na(epa_rank3)]),
+      epa_rank4 = first(epa_rank4[!is.na(epa_rank4)]),
+      comp_percentage_rank1 = first(comp_percentage_rank1[!is.na(comp_percentage_rank1)]),
+      comp_percentage_rank2 = first(comp_percentage_rank2[!is.na(comp_percentage_rank2)]),
+      comp_percentage_rank3 = first(comp_percentage_rank3[!is.na(comp_percentage_rank3)]),
+      comp_percentage_rank4 = first(comp_percentage_rank4[!is.na(comp_percentage_rank4)]),
+      rushingyardspg_rank1 = first(rushingyardspg_rank1[!is.na(rushingyardspg_rank1)]),
+      rushingyardspg_rank2 = first(rushingyardspg_rank2[!is.na(rushingyardspg_rank2)]),
+      rushingyardspg_rank3 = first(rushingyardspg_rank3[!is.na(rushingyardspg_rank3)]),
+      rushingyardspg_rank4 = first(rushingyardspg_rank4[!is.na(rushingyardspg_rank4)]),
+      rushingtdspg_rank1 = first(rushingtdspg_rank1[!is.na(rushingtdspg_rank1)]),
+      rushingtdspg_rank2 = first(rushingtdspg_rank2[!is.na(rushingtdspg_rank2)]),
+      rushingtdspg_rank3 = first(rushingtdspg_rank3[!is.na(rushingtdspg_rank3)]),
+      rushingtdspg_rank4 = first(rushingtdspg_rank4[!is.na(rushingtdspg_rank4)]),
+      tdspg_rank1 = first(tdspg_rank1[!is.na(tdspg_rank1)]),
+      tdspg_rank2 = first(tdspg_rank2[!is.na(tdspg_rank2)]),
+      tdspg_rank3 = first(tdspg_rank3[!is.na(tdspg_rank3)]),
+      tdspg_rank4 = first(tdspg_rank4[!is.na(tdspg_rank4)]),
+      yardspg_rank1 = first(yardspg_rank1[!is.na(yardspg_rank1)]),
+      yardspg_rank2 = first(yardspg_rank2[!is.na(yardspg_rank2)]),
+      yardspg_rank3 = first(yardspg_rank3[!is.na(yardspg_rank3)]),
+      yardspg_rank4 = first(yardspg_rank4[!is.na(yardspg_rank4)]),
+      PassGrade1 = first(PassGrade1[!is.na(PassGrade1)]),
+      PassGrade2 = first(PassGrade2[!is.na(PassGrade2)]),
+      PassGrade3 = first(PassGrade3[!is.na(PassGrade3)]),
+      PassGrade4 = first(PassGrade4[!is.na(PassGrade4)]),
+      BTTPercentage1 = first(BTTPercentage1[!is.na(BTTPercentage1)]),
+      BTTPercentage2 = first(BTTPercentage2[!is.na(BTTPercentage2)]),
+      BTTPercentage3 = first(BTTPercentage3[!is.na(BTTPercentage3)]),
+      BTTPercentage4 = first(BTTPercentage4[!is.na(BTTPercentage4)]),
+      TWPPercentage1 = first(TWPPercentage1[!is.na(TWPPercentage1)]),
+      TWPPercentage2 = first(TWPPercentage2[!is.na(TWPPercentage2)]),
+      TWPPercentage3 = first(TWPPercentage3[!is.na(TWPPercentage3)]),
+      TWPPercentage4 = first(TWPPercentage4[!is.na(TWPPercentage4)]),
+      SkPercentage1 = first(SkPercentage1[!is.na(SkPercentage1)]),
+      SkPercentage2 = first(SkPercentage2[!is.na(SkPercentage2)]),
+      SkPercentage3 = first(SkPercentage3[!is.na(SkPercentage3)]),
+      SkPercentage4 = first(SkPercentage4[!is.na(SkPercentage4)]),
+      ScrPercentage1 = first(ScrPercentage1[!is.na(ScrPercentage1)]),
+      ScrPercentage2 = first(ScrPercentage2[!is.na(ScrPercentage2)]),
+      ScrPercentage3 = first(ScrPercentage3[!is.na(ScrPercentage3)]),
+      ScrPercentage4 = first(ScrPercentage4[!is.na(ScrPercentage4)])
+    )
+  
+  return(df)
+}
+
+TotQBStats <- compress_rows(TotQBStats)
