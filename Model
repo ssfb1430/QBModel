@@ -1,0 +1,251 @@
+library(xgboost)
+library(glmnet)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+
+
+FinalQBStats <- read_csv("QBFinalStats.csv")
+
+FinalQBStats <- FinalQBStats %>%
+  mutate(First3RegWinPercentage = First3RegWins / (First3RegWins + First3RegLosses)) %>%
+  mutate(Next4RegWinPercentage = Next4RegWins / (Next4RegWins + Next4RegLosses)) %>%
+  mutate(Next4WPOver50 = ifelse(Next4RegWinPercentage > 0.5, 1, 0)) %>%
+  mutate(Next4PBinary = ifelse(Next4PAppearances == 0, 0, 1)) %>%
+  mutate(Next4CCGBinary = ifelse(Next4CCGAppearances == 0, 0, 1)) %>%
+  mutate(Next4ProBowlBinary = ifelse(Next4ProBowl == 0, 0, 1)) %>%
+  mutate(ContractvsLastMax = ContractAPY / PreviousMaxAPY)
+
+FinalQBStats[is.na(FinalQBStats)] <- 0
+
+
+
+#Contract Model
+
+
+features_contract <- c("First3RegWins", "First3RegLosses", "First3PWins", "First3PLosses",
+                       "First3PAppearances", "First3SBWins", "First3SBAppearances",
+                       "First3CCGAppearances", "First3ProBowl", "tot_games_played1",
+                       "tot_games_played2", "tot_games_played3", "passingyardspg_rank1",
+                       "passingyardspg_rank2", "passingyardspg_rank3", "passingtdspg_rank1",
+                       "passingtdspg_rank2", "passingtdspg_rank3", "cpoe_rank1", "cpoe_rank2",
+                       "cpoe_rank3", "avg_wpa_rank1", "avg_wpa_rank2", "avg_wpa_rank3", 
+                       "epa_rank1", "epa_rank2", "epa_rank3", "comp_percentage_rank1",
+                       "comp_percentage_rank2", "comp_percentage_rank3", "rushingyardspg_rank1",
+                       "rushingyardspg_rank2", "rushingyardspg_rank3", "rushingtdspg_rank1",
+                       "rushingtdspg_rank2", "rushingtdspg_rank3", "tdspg_rank1", "tdspg_rank2",
+                       "tdspg_rank3", "yardspg_rank1", "yardspg_rank2", "yardspg_rank3",
+                       "PassGrade1", "PassGrade2", "PassGrade3", "BTTPercentage1", 
+                       "BTTPercentage2", "BTTPercentage3", "TWPPercentage1", "TWPPercentage2",
+                       "TWPPercentage3", "SkPercentage1", "SkPercentage2", "SkPercentage3",
+                       "ScrPercentage1", "ScrPercentage2", "ScrPercentage3", "Wins3",
+                       "First3RegWinPercentage")
+
+target_contract <- 'ContractvsLastMax'
+
+train_data_contract <- FinalQBStats[FinalQBStats$Year <= 2019, ]
+test_data_contract <- FinalQBStats[FinalQBStats$Year >= 2020, ]
+
+X_train <- as.matrix(train_data_contract[, features_contract])
+y_train <- train_data_contract[[target_contract]]
+
+dtrain_contract <- xgb.DMatrix(data = X_train, label = y_train)
+
+contract_params <- list(
+  objective = "reg:linear",
+  nrounds = 100,
+  lambda = 1, 
+  alpha = 0.5  
+)
+
+contract_model <- xgb.train(params = contract_params, data = dtrain_contract, nrounds = contract_params$nrounds)
+
+X_test <- as.matrix(test_data_contract[, features_contract])
+colnames(X_test) <- features_contract
+
+dtest <- xgb.DMatrix(data = X_test)
+contract_predictions <- predict(contract_model, dtest)
+
+test_data_contract$Predictions <- contract_predictions
+train_data_contract$Predictions <- predict(contract_model, dtrain_contract)
+
+
+#Playoff App Model
+
+
+
+features_playoffapp <- c("First3RegWins", "First3RegLosses", "First3PWins",
+                         "First3PAppearances", "First3CCGAppearances", "First3ProBowl",
+                         "passingyardspg_rank2", "passingyardspg_rank3", "cpoe_rank2",
+                         "cpoe_rank3", "avg_wpa_rank2", "avg_wpa_rank3", "epa_rank2", "epa_rank3", 
+                         "comp_percentage_rank2", "comp_percentage_rank3", "rushingyardspg_rank3", 
+                         "tdspg_rank1", "tdspg_rank2", "tdspg_rank3", "yardspg_rank2", "yardspg_rank3",
+                         "PassGrade1", "PassGrade2", "PassGrade3", "TWPPercentage2",
+                         "TWPPercentage3", "SkPercentage2", "SkPercentage3",
+                         "ScrPercentage2", "ScrPercentage3",
+                         "First3RegWinPercentage", "Wins3")
+
+target_playoffapp <- 'Next4PBinary'
+
+train_data_playoffapp <- FinalQBStats[FinalQBStats$Year <= 2018, ]
+test_data_playoffapp <- FinalQBStats[FinalQBStats$Year >= 2019, ]
+
+X_train_playoffapp <- as.matrix(train_data_playoffapp[, features_playoffapp])
+y_train_playoffapp <- train_data_playoffapp[[target_playoffapp]]
+
+lambda <- 0.1  # Regularization parameter
+logistic_model <- glmnet(x = X_train_playoffapp, y = y_train_playoffapp, family = "binomial", alpha = 0, lambda = lambda)
+
+X_test_playoffapp <- as.matrix(test_data_playoffapp[, features_playoffapp])
+colnames(X_test_playoffapp) <- features_playoffapp
+test_data_playoffapp$Predictions <- predict(logistic_model, newx = X_test_playoffapp, type = "response")
+
+train_data_playoffapp$Predictions <- predict(logistic_model, newx = X_train_playoffapp, type = "response")
+
+importance <- coef(logistic_model)
+print(importance)
+
+
+
+#CCG App Model
+
+
+
+features_ccgapp <- c("First3RegWins", "First3RegLosses", "First3PWins",
+                     "First3PAppearances", "First3CCGAppearances", "First3ProBowl",
+                     "passingyardspg_rank2", "passingyardspg_rank3", "cpoe_rank2",
+                     "cpoe_rank3", "avg_wpa_rank2", "avg_wpa_rank3", "epa_rank2", "epa_rank3", 
+                     "comp_percentage_rank2", "comp_percentage_rank3", "rushingyardspg_rank3", 
+                     "tdspg_rank1", "tdspg_rank2", "tdspg_rank3", "yardspg_rank2", "yardspg_rank3",
+                     "PassGrade1", "PassGrade2", "PassGrade3", "TWPPercentage2",
+                     "TWPPercentage3", "SkPercentage2", "SkPercentage3",
+                     "ScrPercentage2", "ScrPercentage3",
+                     "First3RegWinPercentage", "Wins3")
+
+target_ccgapp <- 'Next4CCGBinary'
+
+train_data_ccgapp <- FinalQBStats[FinalQBStats$Year <= 2018, ]
+test_data_ccgapp <- FinalQBStats[FinalQBStats$Year >= 2019, ]
+
+X_train_ccgapp <- as.matrix(train_data_ccgapp[, features_ccgapp])
+y_train_ccgapp <- train_data_ccgapp[[target_ccgapp]]
+
+lambda <- 0.1  # Regularization parameter
+logistic_model_ccgapp <- glmnet(x = X_train_ccgapp, y = y_train_ccgapp, family = "binomial", alpha = 0, lambda = lambda)
+
+X_test_ccgapp <- as.matrix(test_data_ccgapp[, features_ccgapp])
+colnames(X_test_ccgapp) <- features_ccgapp
+test_data_ccgapp$Predictions <- predict(logistic_model_ccgapp, newx = X_test_ccgapp, type = "response")
+
+train_data_ccgapp$Predictions <- predict(logistic_model_ccgapp, newx = X_train_ccgapp, type = "response")
+
+importance_ccgapp <- coef(logistic_model_ccgapp)
+print(importance_ccgapp)
+
+
+
+#Pro Bowl App Model
+
+
+features_pbapp <- c("First3RegWins", "First3RegLosses", "First3PWins",
+                    "First3PAppearances", "First3CCGAppearances", "First3ProBowl",
+                    "passingyardspg_rank2", "passingyardspg_rank3", "cpoe_rank2",
+                    "cpoe_rank3", "avg_wpa_rank2", "avg_wpa_rank3", "epa_rank2", "epa_rank3", 
+                    "comp_percentage_rank2", "comp_percentage_rank3", "rushingyardspg_rank3", 
+                    "tdspg_rank1", "tdspg_rank2", "tdspg_rank3", "yardspg_rank2", "yardspg_rank3",
+                    "PassGrade1", "PassGrade2", "PassGrade3", "TWPPercentage2",
+                    "TWPPercentage3", "SkPercentage2", "SkPercentage3",
+                    "ScrPercentage2", "ScrPercentage3",
+                    "First3RegWinPercentage", "Wins3")
+
+target_pbapp <- 'Next4ProBowlBinary'
+
+train_data_pbapp <- FinalQBStats[FinalQBStats$Year <= 2018, ]
+test_data_pbapp <- FinalQBStats[FinalQBStats$Year >= 2019, ]
+
+X_train_pbapp <- as.matrix(train_data_pbapp[, features_pbapp])
+y_train_pbapp <- train_data_pbapp[[target_pbapp]]
+
+lambda <- 0.1  # Regularization parameter
+logistic_model_pbapp <- glmnet(x = X_train_pbapp, y = y_train_pbapp, family = "binomial", alpha = 0, lambda = lambda)
+
+X_test_pbapp <- as.matrix(test_data_pbapp[, features_pbapp])
+colnames(X_test_pbapp) <- features_pbapp
+test_data_pbapp$Predictions <- predict(logistic_model_pbapp, newx = X_test_pbapp, type = "response")
+
+train_data_pbapp$Predictions <- predict(logistic_model_pbapp, newx = X_train_pbapp, type = "response")
+
+importance_pbapp <- coef(logistic_model_pbapp)
+print(importance_pbapp)
+
+
+
+#WP Over 50 Model
+
+
+features_wpover50 <- c("First3RegWins", "First3RegLosses", "First3PWins",
+                       "First3PAppearances", "First3CCGAppearances", "First3ProBowl",
+                       "passingyardspg_rank2", "passingyardspg_rank3", "cpoe_rank2",
+                       "cpoe_rank3", "avg_wpa_rank2", "avg_wpa_rank3", "epa_rank2", "epa_rank3", 
+                       "comp_percentage_rank2", "comp_percentage_rank3", "rushingyardspg_rank3", 
+                       "tdspg_rank1", "tdspg_rank2", "tdspg_rank3", "yardspg_rank2", "yardspg_rank3",
+                       "PassGrade1", "PassGrade2", "PassGrade3", "TWPPercentage2",
+                       "TWPPercentage3", "SkPercentage2", "SkPercentage3",
+                       "ScrPercentage2", "ScrPercentage3",
+                       "First3RegWinPercentage", "Wins3")
+
+target_wpover50 <- 'Next4WPOver50'
+
+train_data_wpover50 <- FinalQBStats[FinalQBStats$Year <= 2018, ]
+test_data_wpover50 <- FinalQBStats[FinalQBStats$Year >= 2019, ]
+
+X_train_wpover50 <- as.matrix(train_data_wpover50[, features_wpover50])
+y_train_wpover50 <- train_data_wpover50[[target_wpover50]]
+
+lambda <- 0.1  # Regularization parameter
+logistic_model_wpover50 <- glmnet(x = X_train_wpover50, y = y_train_wpover50, family = "binomial", alpha = 0, lambda = lambda)
+
+X_test_wpover50 <- as.matrix(test_data_wpover50[, features_wpover50])
+colnames(X_test_wpover50) <- features_wpover50
+test_data_wpover50$Predictions <- predict(logistic_model_wpover50, newx = X_test_wpover50, type = "response")
+
+train_data_wpover50$Predictions <- predict(logistic_model_wpover50, newx = X_train_wpover50, type = "response")
+
+importance_wpover50 <- coef(logistic_model_wpover50)
+print(importance_wpover50)
+
+
+
+#Super Bowl Model
+
+
+features_sbwins <- c("First3RegWins", "First3RegLosses", "First3PWins",
+                     "First3PAppearances", "First3CCGAppearances", "First3ProBowl",
+                     "passingyardspg_rank2", "passingyardspg_rank3", "cpoe_rank2",
+                     "cpoe_rank3", "avg_wpa_rank2", "avg_wpa_rank3", "epa_rank2", "epa_rank3", 
+                     "comp_percentage_rank2", "comp_percentage_rank3", "rushingyardspg_rank3", 
+                     "tdspg_rank1", "tdspg_rank2", "tdspg_rank3", "yardspg_rank2", "yardspg_rank3",
+                     "PassGrade1", "PassGrade2", "PassGrade3", "TWPPercentage2",
+                     "TWPPercentage3", "SkPercentage2", "SkPercentage3",
+                     "ScrPercentage2", "ScrPercentage3",
+                     "First3RegWinPercentage", "Wins3")
+
+target_sbwins <- 'Next4SBWins'
+
+train_data_sbwins <- FinalQBStats[FinalQBStats$Year <= 2018, ]
+test_data_sbwins <- FinalQBStats[FinalQBStats$Year >= 2019, ]
+
+X_train_sbwins <- as.matrix(train_data_sbwins[, features_sbwins])
+y_train_sbwins <- train_data_sbwins[[target_sbwins]]
+
+lambda <- 0.1  # Regularization parameter
+logistic_model_sbwins <- glmnet(x = X_train_sbwins, y = y_train_sbwins, family = "binomial", alpha = 0, lambda = lambda)
+
+X_test_sbwins <- as.matrix(test_data_sbwins[, features_sbwins])
+colnames(X_test_sbwins) <- features_sbwins
+test_data_sbwins$Predictions <- predict(logistic_model_sbwins, newx = X_test_sbwins, type = "response")
+
+train_data_sbwins$Predictions <- predict(logistic_model_sbwins, newx = X_train_sbwins, type = "response")
+
+importance_sbwins <- coef(logistic_model_sbwins)
+print(importance_sbwins)
